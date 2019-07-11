@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+
+import os, sys, subprocess
+
+from pathlib import PurePath
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse
+
+class ManHTTPRequestHandler(BaseHTTPRequestHandler):
+    def server_quit(self):
+        self.send_response(200)
+        
+        self.send_header('Content-Type', 'text/html')
+        self.end_headers()
+        
+        self.wfile.write(bytes(
+            'Good Bye!',
+            'utf8'
+        ))
+        
+        print("Good Byte!")
+        sys.exit(0)
+    
+    def query_man(self, page, section=None):
+        self.send_response(200)
+        
+        self.send_header('Content-Type', 'text/html')
+        self.end_headers()
+        
+        message = """
+        <html>
+            <head>
+                <meta charset="utf-8" />
+                <title>{title}</title>
+                <style>
+                    #man2html > pre {{
+                        font-family: Inconsolata, monospace;
+                        font-size: 12pt;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div id="man2html">
+        {content}
+                </div>
+            </body>
+        </html>
+        """
+        
+        if section is not None:
+            man_command = 'man --encoding=utf8 {section} {page}'
+        else:
+            man_command = 'man --encoding=utf8 {page}'
+        man_command = man_command.format(
+            page=page, section=section,
+        )
+        
+        command = man_command + """ | man2html -topm 0 -botm 0 -bare -cgiurl '/query/man/${section}${subsection}/${title}'"""
+        print(command)
+        
+        env = dict(os.environ)
+        env['MANWIDTH'] = '100'
+        p = subprocess.run(command, shell=True, capture_output=True, text=True, env=env)
+        
+        man_output = p.stdout
+        #print(man_output[0:1024])
+        
+        self.wfile.write(bytes(
+            message.format(
+                title="man: %s" % page,
+                content=man_output,
+            ),
+            'utf8'
+        ))
+    
+    def do_GET(self):
+        url = urlparse(self.path)
+        path = PurePath(url.path)
+        
+        if path.parts[0] != '/':
+            self.send_error(400, 'Bad Request')
+
+        parts = path.parts[1:]
+        
+        if parts == ('server', 'quit'):
+            self.server_quit()
+        elif parts[0] == 'query' and parts[1] == 'man':
+            if len(parts) == 3:
+                self.query_man(page=parts[2])
+            elif len(parts) == 4:
+                self.query_man(page=parts[3], section=parts[2])
+            else:
+                self.send_error(400, 'invalid query')
+    
+def run():
+    server_address = ('localhost', 18901)
+    server = HTTPServer(server_address, ManHTTPRequestHandler)
+    server.serve_forever()
+
+run()
